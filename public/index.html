@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>User Management</h1>
+        
+        <div id="userForm">
+            <h2>Add New User</h2>
+            <input type="text" id="name" placeholder="Name" required>
+            <input type="email" id="email" placeholder="Email" required>
+            <input type="tel" id="phone" placeholder="Phone" required>
+            <button onclick="addUser()">Add User</button>
+            <p id="addError" class="error"></p>
+        </div>
+
+        <div id="userList">
+            <h2>User List</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="userTableBody"></tbody>
+            </table>
+            <div id="pagination"></div>
+        </div>
+    </div>
+
+    <dialog id="deleteModal" class="modal">
+        <div class="modal-content">
+            <h2>Confirm Deletion</h2>
+            <p>Are you sure you want to delete this user?</p>
+            <div class="button-group">
+                <button id="confirmDelete">Yes, Delete</button>
+                <button id="cancelDelete">Cancel</button>
+            </div>
+        </div>
+    </dialog>
+
+    <script>
+        let currentPage = 1;
+        let totalPages = 1;
+        let userIdToDelete = null;
+
+        function fetchUsers(page = 1) {
+            fetch(`/userlist?page=${page}&limit=3`)
+                .then(response => response.json())
+                .then(data => {
+                    const userTableBody = document.getElementById('userTableBody');
+                    userTableBody.innerHTML = '';
+                    data.items.forEach(user => {
+                        userTableBody.innerHTML += `
+                            <tr data-id="${user.id}">
+                                <td><span>${user.name}</span></td>
+                                <td><span>${user.email}</span></td>
+                                <td><span>${user.phone}</span></td>
+                                <td>
+                                    <button onclick="editUser(${user.id})">Edit</button>
+                                    <button onclick="deleteUser(${user.id})">Delete</button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    currentPage = data.currentPage;
+                    totalPages = data.totalPages;
+                    updatePagination();
+                });
+        }
+
+        function updatePagination() {
+            const paginationDiv = document.getElementById('pagination');
+            paginationDiv.innerHTML = '';
+            for (let i = 1; i <= totalPages; i++) {
+                paginationDiv.innerHTML += `<button onclick="fetchUsers(${i})" ${i === currentPage ? 'disabled' : ''}>${i}</button>`;
+            }
+        }
+
+        function validateInput(name, email, phone) {
+            const nameRegex = /^[a-zA-Z\s]{2,30}$/;
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const phoneRegex = /^\d{10}$/;
+
+            if (!name || !email || !phone) {
+                return "All fields are required.";
+            }
+            if (!nameRegex.test(name)) {
+                return "Name should be 2-30 characters long and contain only letters and spaces.";
+            }
+            if (!emailRegex.test(email)) {
+                return "Please enter a valid email address.";
+            }
+            if (!phoneRegex.test(phone)) {
+                return "Phone number should be 10 digits long.";
+            }
+            return null;
+        }
+
+        function addUser() {
+            const name = document.getElementById('name').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+
+            const errorMessage = validateInput(name, email, phone);
+            if (errorMessage) {
+                document.getElementById('addError').textContent = errorMessage;
+                return;
+            }
+
+            const userData = { name, email, phone };
+
+            fetch('/adduser', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                resetForm();
+                return fetch('/userlist?page=1&limit=3');
+            })
+            .then(response => response.json())
+            .then(data => {
+                currentPage = data.totalPages;
+                fetchUsers(currentPage);
+                document.getElementById('addError').textContent = '';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('addError').textContent = 'An error occurred while adding the user.';
+            });
+        }
+
+        function editUser(id) {
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            const cells = row.querySelectorAll('td');
+
+            cells[0].innerHTML = `<input type="text" value="${cells[0].textContent}" required>`;
+            cells[1].innerHTML = `<input type="email" value="${cells[1].textContent}" required>`;
+            cells[2].innerHTML = `<input type="tel" value="${cells[2].textContent}" required>`;
+            cells[3].innerHTML = `
+                <button onclick="saveUser(${id})">Save</button>
+                <button onclick="cancelEdit(${id})">Cancel</button>
+                <p class="error"></p>
+            `;
+        }
+
+        function saveUser(id) {
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            const inputs = row.querySelectorAll('input');
+            const errorElement = row.querySelector('.error');
+
+            const name = inputs[0].value.trim();
+            const email = inputs[1].value.trim();
+            const phone = inputs[2].value.trim();
+
+            const errorMessage = validateInput(name, email, phone);
+            if (errorMessage) {
+                errorElement.textContent = errorMessage;
+                return;
+            }
+
+            const userData = { name, email, phone };
+
+            fetch(`/updateuser${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userData)
+            })
+            .then(() => fetchUsers(currentPage));
+        }
+
+        function cancelEdit(id) {
+            fetchUsers(currentPage);
+        }
+
+        function deleteUser(id) {
+            userIdToDelete = id;
+            const deleteModal = document.getElementById('deleteModal');
+            deleteModal.showModal();
+
+            deleteModal.addEventListener('click', function(event) {
+                if (event.target === deleteModal) {
+                    closeDeleteModal();
+                }
+            });
+        }
+
+        function performDelete() {
+            if (userIdToDelete) {
+                fetch(`/deleteuser${userIdToDelete}`, { method: 'DELETE' })
+                    .then(() => {
+                        fetchUsers(currentPage);
+                        closeDeleteModal();
+                    });
+            }
+        }
+
+        function closeDeleteModal() {
+            const deleteModal = document.getElementById('deleteModal');
+            deleteModal.close();
+            userIdToDelete = null;
+            deleteModal.removeEventListener('click', closeDeleteModal);
+        }
+
+        function resetForm() {
+            document.getElementById('name').value = '';
+            document.getElementById('email').value = '';
+            document.getElementById('phone').value = '';
+        }
+
+        fetchUsers();
+
+        document.getElementById('confirmDelete').addEventListener('click', function() {
+            performDelete();
+            closeDeleteModal();
+        });
+        document.getElementById('cancelDelete').addEventListener('click', closeDeleteModal);
+    </script>
+</body>
+</html>
